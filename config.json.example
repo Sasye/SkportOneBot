@@ -1,0 +1,10 @@
+{
+  "onebot": {
+    "ws_url": "ws://127.0.0.1:6700",
+    "access_token": ""
+  },
+  "bind_port": 7777,
+  "bind_url": "http://127.0.0.1:7777",
+  "cron_schedule": "0 10 * * *",
+  "allowed_groups": []
+}
