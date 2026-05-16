@@ -22,7 +22,7 @@ This is a fully automated daily sign-in bot for the *Arknights: Endfield* intern
    ```json
    {
      "onebot": {
-       "ws_url": "ws://127.0.0.1:6700", // Your OneBot client WebSocket URL
+       "ws_url": "ws://127.0.0.1:6700", // Your OneBot client Forward WebSocket URL
        "access_token": ""               // WebSocket access token (optional)
      },
      "bind_port": 7777,                 // The port for the internal Web server

@@ -22,7 +22,7 @@
    ```json
    {
      "onebot": {
-       "ws_url": "ws://127.0.0.1:6700", // 你的 OneBot 客户端反向 WebSocket 地址
+       "ws_url": "ws://127.0.0.1:6700", // 你的 OneBot 客户端正向 WebSocket 地址
        "access_token": ""               // WebSocket 访问令牌（可选）
      },
      "bind_port": 7777,                 // 机器人 Web 服务运行端口
