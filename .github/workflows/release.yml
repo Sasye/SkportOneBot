@@ -7,10 +7,19 @@ on:
 
 jobs:
   build:
-    name: Build Release
-    runs-on: windows-latest
+    name: Build Release (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: write
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            suffix: .exe
+          - os: ubuntu-latest
+            rid: linux-x64
+            suffix: ''
 
     steps:
       - name: Checkout Code
@@ -23,19 +32,29 @@ jobs:
 
       - name: Build Project
         run: |
-          dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+          dotnet publish -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=true
 
-      - name: Package Release
+      - name: Package Release (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
         run: |
           mkdir release_pkg
           copy bin\Release\net10.0\win-x64\publish\SkportOneBot.exe release_pkg\
           copy config.json.example release_pkg\
           Compress-Archive -Path release_pkg\* -DestinationPath "SkportOneBot_${{ github.ref_name }}_win-x64.zip"
 
+      - name: Package Release (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          mkdir release_pkg
+          cp bin/Release/net10.0/linux-x64/publish/SkportOneBot release_pkg/
+          cp config.json.example release_pkg/
+          tar -czvf "SkportOneBot_${{ github.ref_name }}_linux-x64.tar.gz" -C release_pkg .
+
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          files: SkportOneBot_${{ github.ref_name }}_win-x64.zip
+          files: SkportOneBot_${{ github.ref_name }}_*
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
