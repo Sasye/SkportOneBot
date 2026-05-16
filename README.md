@@ -2,7 +2,7 @@
 
 [English](README_EN.md) | 中文
 
-这是一个基于 .NET 10开发的明日方舟：终末地自动签到机器人，通过OneBotv11协议接入 QQ。
+这是一个基于 .NET 10开发的明日方舟：终末地国际服skport自动签到机器人，通过OneBotv11协议接入 QQ。
 
 ## 环境要求
 

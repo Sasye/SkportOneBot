@@ -2,7 +2,7 @@
 
 English | [中文](README.md)
 
-This is a fully automated daily sign-in bot for *Arknights: Endfield*, developed in .NET 10 and connected to QQ via the OneBot v11 protocol.
+This is a fully automated daily sign-in bot for the *Arknights: Endfield* international server (skport), developed in .NET 10 and connected to QQ via the OneBot v11 protocol.
 
 ## Requirements
 
