@@ -1,0 +1,41 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build Release
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build Project
+        run: |
+          dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+
+      - name: Package Release
+        run: |
+          mkdir release_pkg
+          copy bin\Release\net10.0\win-x64\publish\SkportOneBot.exe release_pkg\
+          copy config.json.example release_pkg\
+          Compress-Archive -Path release_pkg\* -DestinationPath "SkportOneBot_${{ github.ref_name }}_win-x64.zip"
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          files: SkportOneBot_${{ github.ref_name }}_win-x64.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
