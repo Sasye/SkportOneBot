@@ -28,6 +28,18 @@ public sealed class SkportService
     private const string BindingUrl = "https://zonai.skport.com/api/v1/game/player/binding";
     private const string EndfieldSignUrl = "https://zonai.skport.com/api/v1/game/endfield/attendance";
 
+    private static readonly Dictionary<string, string> ItemTranslations = new(StringComparer.OrdinalIgnoreCase)
+    {
+        { "Intermediate Combat Record", "中级作战记录" },
+        { "Elementary Cognitive Carrier", "初级存相载体" },
+        { "Advanced Combat Record", "高级作战记录" },
+        { "Arms INSP Kit", "武器检查装置" },
+        { "Arms INSP Set", "武器检查套件" },
+        { "Protoprism", "协议棱柱" },
+        { "Talosian Credit Notes|T-Creds", "折金票" },
+        { "Oroberyl", "嵌晶玉" }
+    };
+
     private static readonly HttpClient Http = new HttpClient(new HttpClientHandler
     {
         AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
@@ -151,6 +163,8 @@ public sealed class SkportService
 
                 var info = infoMap[id];
                 var name = info?["name"]?.GetValue<string>() ?? "";
+                if (ItemTranslations.TryGetValue(name, out var zhName)) name = zhName;
+                
                 var count = info?["count"]?.GetValue<int?>() ?? 1;
                 if (!string.IsNullOrWhiteSpace(name)) awards.Add($"{name}x{count}");
             }
@@ -200,7 +214,6 @@ public sealed class SkportService
         var request = new HttpRequestMessage(method, url);
         request.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
         request.Headers.TryAddWithoutValidation("Accept-Encoding", "gzip");
-        request.Headers.TryAddWithoutValidation("Accept-Language", "zh-CN,zh;q=0.9");
         request.Headers.TryAddWithoutValidation("Connection", "close");
         request.Headers.TryAddWithoutValidation("X-Requested-With", "com.gryphline.skport");
         return request;

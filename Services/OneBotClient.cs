@@ -203,50 +203,58 @@ public class OneBotClient
 
     public async Task<string> SignProfileAsync(Profile profile)
     {
-        try
+        for (int retry = 0; retry < 3; retry++)
         {
-            var binding = new SkportBinding("endfield", "终末地", "", profile.AccountName, "", "", new List<SkportRole>
+            try
             {
-                new SkportRole(profile.RoleId, profile.ServerId, profile.AccountName)
-            });
-
-            var session = new SkportSession(profile.Cred, profile.Token);
-            var result = await _skportService.SignEndfieldAsync(binding, session);
-
-            if (result.Contains("Token已过期") && !string.IsNullOrEmpty(profile.Account) && !string.IsNullOrEmpty(profile.Password))
-            {
-                Console.WriteLine($"[Sign] Token过期，正在尝试自动刷新 {profile.AccountName}...");
-                try
+                var binding = new SkportBinding("endfield", "终末地", "", profile.AccountName, "", "", new List<SkportRole>
                 {
-                    var baseToken = await _skportService.LoginByPasswordAsync(profile.Account, profile.Password);
-                    var skSession = await _skportService.LoginByTokenAsync(baseToken);
-                    profile.Cred = skSession.Cred;
-                    profile.Token = skSession.SignToken;
+                    new SkportRole(profile.RoleId, profile.ServerId, profile.AccountName)
+                });
 
-                    var profiles = _getProfiles();
-                    var existing = profiles.FirstOrDefault(p => p.RoleId == profile.RoleId && p.ServerId == profile.ServerId);
-                    if (existing != null)
+                var session = new SkportSession(profile.Cred, profile.Token);
+                var result = await _skportService.SignEndfieldAsync(binding, session);
+
+                if (result.Contains("Token已过期") && !string.IsNullOrEmpty(profile.Account) && !string.IsNullOrEmpty(profile.Password))
+                {
+                    Console.WriteLine($"[Sign] Token过期，正在尝试自动刷新 {profile.AccountName}...");
+                    try
                     {
-                        existing.Cred = profile.Cred;
-                        existing.Token = profile.Token;
-                        _saveProfiles(profiles);
+                        var baseToken = await _skportService.LoginByPasswordAsync(profile.Account, profile.Password);
+                        var skSession = await _skportService.LoginByTokenAsync(baseToken);
+                        profile.Cred = skSession.Cred;
+                        profile.Token = skSession.SignToken;
+
+                        var profiles = _getProfiles();
+                        var existing = profiles.FirstOrDefault(p => p.RoleId == profile.RoleId && p.ServerId == profile.ServerId);
+                        if (existing != null)
+                        {
+                            existing.Cred = profile.Cred;
+                            existing.Token = profile.Token;
+                            _saveProfiles(profiles);
+                        }
+
+                        session = new SkportSession(profile.Cred, profile.Token);
+                        result = await _skportService.SignEndfieldAsync(binding, session);
                     }
+                    catch (Exception e)
+                    {
+                        result = $"[{profile.AccountName}] 自动刷新 Token 失败，请重新绑定！({e.Message})";
+                    }
+                }
 
-                    session = new SkportSession(profile.Cred, profile.Token);
-                    result = await _skportService.SignEndfieldAsync(binding, session);
-                }
-                catch (Exception e)
-                {
-                    result = $"[{profile.AccountName}] 自动刷新 Token 失败，请重新绑定！({e.Message})";
-                }
+                return result;
             }
-
-            return result;
+            catch (Exception ex)
+            {
+                if (retry == 2)
+                    return $"Endfield 签到请求失败 ({profile.AccountName}): {ex.Message}";
+                
+                Console.WriteLine($"[Sign] {profile.AccountName} 请求失败 ({ex.Message})，将在 3 秒后重试 ({retry + 1}/3)...");
+                await Task.Delay(3000);
+            }
         }
-        catch (Exception ex)
-        {
-            return $"Endfield 签到请求失败 ({profile.AccountName}): {ex.Message}";
-        }
+        return "";
     }
 
     public async Task SendPayloadAsync(object payload)
