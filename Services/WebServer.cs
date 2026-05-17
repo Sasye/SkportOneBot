@@ -15,14 +15,14 @@ public class WebServer
     private readonly HttpListener _listener;
     private readonly ConcurrentDictionary<string, BindSession> _bindSessions = new();
     private readonly SkportService _skportService;
-    private readonly Action<Profile> _onProfileAdded;
+    private readonly ProfileManager _profileManager;
 
-    public WebServer(int port, SkportService skportService, Action<Profile> onProfileAdded)
+    public WebServer(int port, SkportService skportService, ProfileManager profileManager)
     {
         _listener = new HttpListener();
         _listener.Prefixes.Add($"http://*:{port}/");
         _skportService = skportService;
-        _onProfileAdded = onProfileAdded;
+        _profileManager = profileManager;
     }
 
     public void Start()
@@ -132,7 +132,7 @@ public class WebServer
                             BindMessageType = session.MessageType,
                             BindGroupId = session.GroupId
                         };
-                        _onProfileAdded(newProfile);
+                        _profileManager.AddOrUpdateProfile(newProfile);
                         addedRoles.Add(new { nickname = role.Nickname, channelName = roles[0].ChannelName });
                     }
 

@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
+using SkportOneBot.Models;
 
 namespace SkportOneBot.Services;
 
@@ -145,7 +146,7 @@ public sealed class SkportService
             {
                 var code = root["code"]?.GetValue<int?>() ?? -1;
                 if (code == 10000) {
-                    results.Add($"{title} 签到失败：Token已过期! 请重新绑定。");
+                    throw new TokenExpiredException("Token已过期");
                 } else if (code == 10001) {
                     results.Add($"{title} 今日已签到");
                 } else {

@@ -4,26 +4,29 @@ using System.Threading;
 using System.Threading.Tasks;
 using Cronos;
 using SkportOneBot.Models;
+using SkportOneBot.Commands.Modules;
 
 namespace SkportOneBot.Services;
 
 public class CronScheduler
 {
-    private readonly AppConfig _config;
-    private readonly Func<System.Collections.Generic.List<Profile>> _getProfiles;
+    private readonly ConfigManager _configManager;
+    private readonly ProfileManager _profileManager;
+    private readonly EndfieldModule _endfieldModule;
     private readonly OneBotClient _oneBotClient;
     private CancellationTokenSource _cts = new();
 
-    public CronScheduler(AppConfig config, Func<System.Collections.Generic.List<Profile>> getProfiles, OneBotClient oneBotClient)
+    public CronScheduler(ConfigManager configManager, ProfileManager profileManager, EndfieldModule endfieldModule, OneBotClient oneBotClient)
     {
-        _config = config;
-        _getProfiles = getProfiles;
+        _configManager = configManager;
+        _profileManager = profileManager;
+        _endfieldModule = endfieldModule;
         _oneBotClient = oneBotClient;
     }
 
     public void Start()
     {
-        if (string.IsNullOrWhiteSpace(_config.CronSchedule))
+        if (string.IsNullOrWhiteSpace(_configManager.Config.CronSchedule))
         {
             Console.WriteLine("[Cron] 未设置定时任务 (cron_schedule 为空)");
             return;
@@ -31,8 +34,8 @@ public class CronScheduler
 
         try
         {
-            var expression = CronExpression.Parse(_config.CronSchedule, CronFormat.Standard);
-            Console.WriteLine($"[Cron] 已设置定时任务: {_config.CronSchedule}");
+            var expression = CronExpression.Parse(_configManager.Config.CronSchedule, CronFormat.Standard);
+            Console.WriteLine($"[Cron] 已设置定时任务: {_configManager.Config.CronSchedule}");
             _ = Task.Run(() => ScheduleNextRun(expression));
         }
         catch (Exception ex)
@@ -64,12 +67,12 @@ public class CronScheduler
     private async Task ExecuteSignaturesAsync()
     {
         Console.WriteLine($"[Cron] 开始执行定时签到任务...");
-        var profiles = _getProfiles().Where(p => !string.IsNullOrEmpty(p.Cred)).ToList();
+        var profiles = _profileManager.GetAllProfiles().Where(p => !string.IsNullOrEmpty(p.Cred)).ToList();
 
         foreach (var profile in profiles)
         {
             Console.WriteLine($"[Sign] 正在签到账号: {profile.AccountName}");
-            var result = await _oneBotClient.SignProfileAsync(profile);
+            var result = await _endfieldModule.PerformSignAsync(profile);
 
             Console.WriteLine($"[Sign Result] {result}");
 
