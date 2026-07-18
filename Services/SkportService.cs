@@ -384,7 +384,7 @@ public sealed class SkportService
         request.Headers.TryAddWithoutValidation("Accept-Encoding", "gzip");
         request.Headers.TryAddWithoutValidation("Connection", "keep-alive");
         request.Headers.TryAddWithoutValidation("X-Requested-With", "com.gryphline.skport");
-        request.Headers.TryAddWithoutValidation("sk-language", "zh-cn");
+        request.Headers.TryAddWithoutValidation("sk-language", "en");
         return request;
     }
 
