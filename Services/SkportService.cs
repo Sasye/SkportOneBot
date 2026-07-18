@@ -21,7 +21,7 @@ public sealed class SkportService
 
     private const string AppCode = "3dacefa138426cfe";
     private const string SkportAppCode = "6eb76d4e13aa36e6";
-    private const string UserAgent = "Mozilla/5.0 (Linux; Android 12; SM-A5560 Build/V417IR; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/101.0.4951.61 Safari/537.36; SKLand/1.52.1";
+    private const string UserAgent = "Skport/0.7.0 (com.gryphline.skport; build:700089; Android 33; ) Okhttp/5.1.0";
     
     private const string TokenByPasswordUrl = "https://as.gryphline.com/user/auth/v1/token_by_email_password";
     private const string GrantCodeUrl = "https://as.gryphline.com/user/oauth2/v2/grant";
@@ -40,6 +40,8 @@ public sealed class SkportService
         { "Talosian Credit Notes|T-Creds", "折金票" },
         { "Oroberyl", "嵌晶玉" }
     };
+
+    private static long _serverTimeOffset = 0;
 
     private static readonly HttpClient Http = new HttpClient(new HttpClientHandler
     {
@@ -93,6 +95,7 @@ public sealed class SkportService
             throw new InvalidOperationException("使用 token 获取授权码失败：返回结果缺少 code。");
 
         using var credRequest = CreateRequest(HttpMethod.Post, CredCodeUrl);
+        credRequest.Headers.TryAddWithoutValidation("platform", "3");
         credRequest.Content = JsonContent(JsonSerializer.Serialize(new Dictionary<string, object>
         {
             ["code"] = grantCode,
@@ -283,17 +286,33 @@ public sealed class SkportService
         foreach (var role in binding.Roles)
         {
             using var request = CreateSignedRequest(HttpMethod.Post, EndfieldSignUrl, "{}", session);
-            request.Content = JsonContent("{}");
+            request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
             request.Headers.TryAddWithoutValidation("sk-game-role", $"3_{role.RoleId}_{role.ServerId}");
             request.Headers.TryAddWithoutValidation("referer", "https://game.skport.com/");
-            request.Headers.TryAddWithoutValidation("origin", "https://game.skport.com/");
+            request.Headers.TryAddWithoutValidation("origin", "https://game.skport.com");
 
             var root = await SendJsonAsync(request, cancellationToken).ConfigureAwait(false);
+            var code = root["code"]?.GetValue<int?>() ?? -1;
+
+            if (code == 10003)
+            {
+                Console.WriteLine("[SkportService] 检测到时间偏差错误 (10003)，已完成时间校准，正在尝试重新发起请求...");
+                request.Dispose();
+
+                using var retryRequest = CreateSignedRequest(HttpMethod.Post, EndfieldSignUrl, "{}", session);
+                retryRequest.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+                retryRequest.Headers.TryAddWithoutValidation("sk-game-role", $"3_{role.RoleId}_{role.ServerId}");
+                retryRequest.Headers.TryAddWithoutValidation("referer", "https://game.skport.com/");
+                retryRequest.Headers.TryAddWithoutValidation("origin", "https://game.skport.com");
+
+                root = await SendJsonAsync(retryRequest, cancellationToken).ConfigureAwait(false);
+                code = root["code"]?.GetValue<int?>() ?? -1;
+            }
+
             var channelStr = string.IsNullOrWhiteSpace(binding.ChannelName) ? "" : $"({binding.ChannelName})";
             var title = $"[{binding.GameName}] 角色 {role.Nickname}{channelStr}";
             if (!IsApiOk(root))
             {
-                var code = root["code"]?.GetValue<int?>() ?? -1;
                 if (code == 10000) {
                     throw new TokenExpiredException("Token已过期");
                 } else if (code == 10001) {
@@ -342,13 +361,12 @@ public sealed class SkportService
 
     private static (string Sign, Dictionary<string, string> Headers) GenerateSignature(string token, string path, string? bodyOrQuery)
     {
-        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds() + Interlocked.Read(ref _serverTimeOffset);
         var headers = new Dictionary<string, string>
         {
             ["platform"] = "3",
             ["timestamp"] = timestamp.ToString(CultureInfo.InvariantCulture),
-            ["dId"] = "",
-            ["vName"] = "1.0.0"
+            ["vname"] = "1.0.0"
         };
 
         var headerJson = $"{{\"platform\":\"3\",\"timestamp\":\"{headers["timestamp"]}\",\"dId\":\"\",\"vName\":\"1.0.0\"}}";
@@ -364,8 +382,9 @@ public sealed class SkportService
         var request = new HttpRequestMessage(method, url);
         request.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
         request.Headers.TryAddWithoutValidation("Accept-Encoding", "gzip");
-        request.Headers.TryAddWithoutValidation("Connection", "close");
+        request.Headers.TryAddWithoutValidation("Connection", "keep-alive");
         request.Headers.TryAddWithoutValidation("X-Requested-With", "com.gryphline.skport");
+        request.Headers.TryAddWithoutValidation("sk-language", "zh-cn");
         return request;
     }
 
@@ -377,8 +396,16 @@ public sealed class SkportService
     private async Task<JsonNode> SendJsonAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         Console.WriteLine($"[SkportService] API Request: {request.Method} {request.RequestUri}");
+        foreach (var header in request.Headers)
+        {
+            Console.WriteLine($"[SkportService] API Request Header: {header.Key} = {string.Join(", ", header.Value)}");
+        }
         if (request.Content != null)
         {
+            foreach (var header in request.Content.Headers)
+            {
+                Console.WriteLine($"[SkportService] API Request Content Header: {header.Key} = {string.Join(", ", header.Value)}");
+            }
             var requestBody = await request.Content.ReadAsStringAsync();
             Console.WriteLine($"[SkportService] API Request Body: {requestBody}");
         }
@@ -391,7 +418,9 @@ public sealed class SkportService
 
         try
         {
-            return JsonNode.Parse(text) ?? new JsonObject();
+            var root = JsonNode.Parse(text) ?? new JsonObject();
+            UpdateServerTimeOffset(root);
+            return root;
         }
         catch (JsonException)
         {
@@ -401,6 +430,45 @@ public sealed class SkportService
                 throw new HttpRequestException($"HTTP {(int)response.StatusCode}: {text}");
             }
             throw;
+        }
+    }
+
+    private static void UpdateServerTimeOffset(JsonNode root)
+    {
+        if (root is JsonObject obj && obj.TryGetPropertyValue("timestamp", out var tsNode) && tsNode != null)
+        {
+            try
+            {
+                long serverTime = 0;
+                if (tsNode.GetValueKind() == JsonValueKind.String)
+                {
+                    if (long.TryParse(tsNode.GetValue<string>(), out var st))
+                        serverTime = st;
+                }
+                else if (tsNode.GetValueKind() == JsonValueKind.Number)
+                {
+                    serverTime = tsNode.GetValue<long>();
+                }
+
+                if (serverTime > 0)
+                {
+                    var localTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                    var offset = serverTime - localTime;
+                    if (Math.Abs(offset) > 1)
+                    {
+                        Interlocked.Exchange(ref _serverTimeOffset, offset);
+                        Console.WriteLine($"[SkportService] Time Sync: Server = {serverTime}, Local = {localTime}, Offset = {offset}s");
+                    }
+                    else
+                    {
+                        Interlocked.Exchange(ref _serverTimeOffset, 0);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[SkportService] Failed to sync server time: {ex.Message}");
+            }
         }
     }
 
