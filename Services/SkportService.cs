@@ -26,7 +26,7 @@ public sealed class SkportService
     private const string TokenByPasswordUrl = "https://as.gryphline.com/user/auth/v1/token_by_email_password";
     private const string GrantCodeUrl = "https://as.gryphline.com/user/oauth2/v2/grant";
     private const string CredCodeUrl = "https://zonai.skport.com/api/v1/user/auth/generate_cred_by_code";
-    private const string BindingUrl = "https://zonai.skport.com/api/v1/game/player/binding";
+    private const string BindingUrl = "https://binding-api-account-prod.gryphline.com/account/binding/v1/binding_list?appCode=endfield";
     private const string EndfieldSignUrl = "https://zonai.skport.com/api/v1/game/endfield/attendance";
 
     private static readonly Dictionary<string, string> ItemTranslations = new(StringComparer.OrdinalIgnoreCase)
@@ -49,7 +49,7 @@ public sealed class SkportService
         Timeout = TimeSpan.FromSeconds(25)
     };
 
-    public async Task<string> LoginByPasswordAsync(string account, string password, CancellationToken cancellationToken = default)
+    public async Task<(string token, string uid)> LoginByPasswordAsync(string account, string password, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(account))
             throw new ArgumentException("请输入账号", nameof(account));
@@ -70,7 +70,11 @@ public sealed class SkportService
         request.Content = JsonContent(JsonSerializer.Serialize(payload));
 
         var root = await SendJsonAsync(request, cancellationToken).ConfigureAwait(false);
-        return ExtractLoginToken(root, "账号密码登录");
+        EnsureAuthOk(root, "账号密码登录");
+        var token = root["data"]?["token"]?.GetValue<string>() ?? "";
+        if (string.IsNullOrWhiteSpace(token))
+            throw new InvalidOperationException($"账号密码登录失败：返回结果缺少 token。");
+        return (token, "");
     }
 
     public async Task<SkportSession> LoginByTokenAsync(string token, CancellationToken cancellationToken = default)
@@ -128,13 +132,158 @@ public sealed class SkportService
         return result;
     }
 
+    public async Task<string> GetBindingListUidAsync(string oauthToken, string provider = "gryphline", CancellationToken cancellationToken = default)
+    {
+        var encodedToken = Uri.EscapeDataString(oauthToken);
+        var url = $"https://binding-api-account-prod.{provider}.com/account/binding/v1/binding_list?token={encodedToken}&appCode=endfield";
+        using var request = CreateRequest(HttpMethod.Get, url);
+        
+        var root = await SendJsonAsync(request, cancellationToken).ConfigureAwait(false);
+        EnsureAuthOk(root, "获取绑定列表(binding_list)");
+        
+        var appInfo = root["data"]?["list"]?.AsArray()?.FirstOrDefault(x => x?["appCode"]?.GetValue<string>() == "endfield");
+        if (appInfo == null)
+            appInfo = root["data"]?["list"]?.AsArray()?.FirstOrDefault();
+            
+        var bindingList = appInfo?["bindingList"]?.AsArray();
+        var uid = bindingList?.FirstOrDefault()?["uid"]?.GetValue<string>() ?? "";
+        
+        if (string.IsNullOrWhiteSpace(uid))
+            throw new InvalidOperationException("获取账号 UID 失败：返回结果缺少 uid。");
+            
+        return uid;
+    }
+
+    public async Task<string> GetGachaAuthAsync(string baseToken, string provider = "gryphline", CancellationToken cancellationToken = default)
+    {
+        var appCode = provider == "gryphline" ? "3dacefa138426cfe" : "be36d44aa36bfb5b";
+        var url = $"https://as.{provider}.com/user/oauth2/v2/grant";
+        using var grantRequest = CreateRequest(HttpMethod.Post, url);
+        grantRequest.Content = JsonContent(JsonSerializer.Serialize(new {
+            type = 1,
+            appCode = appCode,
+            token = baseToken
+        }));
+        
+        var grantRoot = await SendJsonAsync(grantRequest, cancellationToken).ConfigureAwait(false);
+        EnsureAuthOk(grantRoot, "获取抽卡授权(grant)");
+        
+        var token = grantRoot["data"]?["token"]?.GetValue<string>() ?? "";
+        if (string.IsNullOrWhiteSpace(token))
+            throw new InvalidOperationException("获取抽卡授权失败：返回结果缺少 token。");
+            
+        return token;
+    }
+
+    public async Task<string> GetU8TokenAsync(string gameToken, string uid, string provider = "gryphline", CancellationToken cancellationToken = default)
+    {
+        Console.WriteLine($"[SkportService] GetU8TokenAsync: uid={uid}");
+        var url = $"https://binding-api-account-prod.{provider}.com/account/binding/v1/u8_token_by_uid";
+        using var request = CreateRequest(HttpMethod.Post, url);
+        request.Content = JsonContent(JsonSerializer.Serialize(new { uid = uid, token = gameToken }));
+        
+        var root = await SendJsonAsync(request, cancellationToken).ConfigureAwait(false);
+        EnsureAuthOk(root, "获取 u8_token");
+        var token = root["data"]?["token"]?.GetValue<string>() ?? throw new InvalidOperationException("获取 u8_token 失败，缺少 token");
+        Console.WriteLine($"[SkportService] Got u8_token length: {token.Length}");
+        return token;
+    }
+
+    public async Task<List<EndFieldCharInfo>> GetCharRecordsAsync(string u8Token, string serverId, string poolType, string provider = "gryphline", CancellationToken cancellationToken = default)
+    {
+        var allData = new List<EndFieldCharInfo>();
+        string nextSeqId = "";
+        bool hasMore = true;
+        var baseUrl = $"https://ef-webview.{provider}.com/api/record/char";
+
+        var encodedToken = Uri.EscapeDataString(u8Token);
+        while (hasMore)
+        {
+            var url = $"{baseUrl}?lang=zh-cn&token={encodedToken}&server_id={serverId}&pool_type={poolType}";
+            if (!string.IsNullOrEmpty(nextSeqId))
+                url += $"&seq_id={nextSeqId}";
+
+            using var request = CreateRequest(HttpMethod.Get, url);
+            var root = await SendJsonAsync(request, cancellationToken).ConfigureAwait(false);
+            EnsureApiOk(root, $"获取抽卡记录 ({poolType})");
+
+            var listArray = root["data"]?["list"]?.AsArray();
+            if (listArray == null || listArray.Count == 0)
+                break;
+
+            var list = JsonSerializer.Deserialize<List<EndFieldCharInfo>>(listArray.ToJsonString()) ?? new();
+            allData.AddRange(list);
+
+            hasMore = root["data"]?["hasMore"]?.GetValue<bool>() ?? false;
+            nextSeqId = list.LastOrDefault()?.SeqId ?? "";
+
+            if (hasMore) await Task.Delay(50, cancellationToken);
+        }
+
+        return allData;
+    }
+
+    public async Task<List<(string PoolId, string PoolName)>> GetWeaponPoolsAsync(string u8Token, string serverId, string provider = "gryphline", CancellationToken cancellationToken = default)
+    {
+        var encodedToken = Uri.EscapeDataString(u8Token);
+        var url = $"https://ef-webview.{provider}.com/api/record/weapon/pool?lang=zh-cn&token={encodedToken}&server_id={serverId}";
+        using var request = CreateRequest(HttpMethod.Get, url);
+        var root = await SendJsonAsync(request, cancellationToken).ConfigureAwait(false);
+        EnsureApiOk(root, "获取武器池列表");
+
+        var dataArr = root["data"]?.AsArray();
+        var result = new List<(string, string)>();
+        if (dataArr != null)
+        {
+            foreach (var item in dataArr)
+            {
+                result.Add((item?["poolId"]?.GetValue<string>() ?? "", item?["poolName"]?.GetValue<string>() ?? ""));
+            }
+        }
+        return result;
+    }
+
+    public async Task<List<EndFieldWeaponInfo>> GetWeaponRecordsAsync(string u8Token, string serverId, string poolId, string provider = "gryphline", CancellationToken cancellationToken = default)
+    {
+        var allData = new List<EndFieldWeaponInfo>();
+        string nextSeqId = "";
+        bool hasMore = true;
+        var baseUrl = $"https://ef-webview.{provider}.com/api/record/weapon";
+
+        var encodedToken = Uri.EscapeDataString(u8Token);
+        while (hasMore)
+        {
+            var url = $"{baseUrl}?lang=zh-cn&token={encodedToken}&server_id={serverId}&pool_id={poolId}";
+            if (!string.IsNullOrEmpty(nextSeqId))
+                url += $"&seq_id={nextSeqId}";
+
+            using var request = CreateRequest(HttpMethod.Get, url);
+            var root = await SendJsonAsync(request, cancellationToken).ConfigureAwait(false);
+            EnsureApiOk(root, $"获取武器池记录 ({poolId})");
+
+            var listArray = root["data"]?["list"]?.AsArray();
+            if (listArray == null || listArray.Count == 0)
+                break;
+
+            var list = JsonSerializer.Deserialize<List<EndFieldWeaponInfo>>(listArray.ToJsonString()) ?? new();
+            allData.AddRange(list);
+
+            hasMore = root["data"]?["hasMore"]?.GetValue<bool>() ?? false;
+            nextSeqId = list.LastOrDefault()?.SeqId ?? "";
+
+            if (hasMore) await Task.Delay(50, cancellationToken);
+        }
+
+        return allData;
+    }
+
     public async Task<string> SignEndfieldAsync(SkportBinding binding, SkportSession session, CancellationToken cancellationToken = default)
     {
         var results = new List<string>();
         foreach (var role in binding.Roles)
         {
-            using var request = CreateSignedRequest(HttpMethod.Post, EndfieldSignUrl, "", session);
-            request.Content = JsonContent("");
+            using var request = CreateSignedRequest(HttpMethod.Post, EndfieldSignUrl, "{}", session);
+            request.Content = JsonContent("{}");
             request.Headers.TryAddWithoutValidation("sk-game-role", $"3_{role.RoleId}_{role.ServerId}");
             request.Headers.TryAddWithoutValidation("referer", "https://game.skport.com/");
             request.Headers.TryAddWithoutValidation("origin", "https://game.skport.com/");
@@ -193,7 +342,7 @@ public sealed class SkportService
 
     private static (string Sign, Dictionary<string, string> Headers) GenerateSignature(string token, string path, string? bodyOrQuery)
     {
-        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - 2;
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var headers = new Dictionary<string, string>
         {
             ["platform"] = "3",
@@ -225,19 +374,32 @@ public sealed class SkportService
         return new StringContent(json, Encoding.UTF8, "application/json");
     }
 
-    private static async Task<JsonNode> SendJsonAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    private async Task<JsonNode> SendJsonAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        Console.WriteLine($"[SkportService] API Request: {request.Method} {request.RequestUri}");
+        if (request.Content != null)
+        {
+            var requestBody = await request.Content.ReadAsStringAsync();
+            Console.WriteLine($"[SkportService] API Request Body: {requestBody}");
+        }
+
         using var response = await Http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         
+        // Log full response
+        Console.WriteLine($"[SkportService] API Response ({response.StatusCode}): {text}");
+
         try
         {
             return JsonNode.Parse(text) ?? new JsonObject();
         }
-        catch
+        catch (JsonException)
         {
             if (!response.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"[SkportService] API Request Failed: HTTP {(int)response.StatusCode}");
                 throw new HttpRequestException($"HTTP {(int)response.StatusCode}: {text}");
+            }
             throw;
         }
     }

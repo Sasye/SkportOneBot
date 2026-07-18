@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using SkportOneBot.Models;
 using SkportOneBot.Commands.Modules;
@@ -41,6 +42,15 @@ public class CommandRouter
         if (text == "终末地签到" || text == "zmdqd" || text == "skport签到")
         {
             await _endfieldModule.SignAsync(ctx);
+            return;
+        }
+
+        var gachaPrefixes = new[] { "终末地抽卡分析", "终末地抽卡", "zmdck" };
+        var matchedPrefix = gachaPrefixes.FirstOrDefault(p => text.StartsWith(p));
+        if (matchedPrefix != null)
+        {
+            var args = text.Substring(matchedPrefix.Length).Trim();
+            await _endfieldModule.GachaAnalyzeAsync(ctx, args);
             return;
         }
     }

@@ -103,8 +103,8 @@ public class WebServer
                 {
                     if (data.Mode == "auto")
                     {
-                        var baseToken = await _skportService.LoginByPasswordAsync(data.Account ?? "", data.Password ?? "");
-                        var skSession = await _skportService.LoginByTokenAsync(baseToken);
+                        var authResult = await _skportService.LoginByPasswordAsync(data.Account ?? "", data.Password ?? "");
+                        var skSession = await _skportService.LoginByTokenAsync(authResult.token);
                         cred = skSession.Cred;
                         skToken = skSession.SignToken;
                     }

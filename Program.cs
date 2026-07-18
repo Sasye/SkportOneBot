@@ -10,7 +10,7 @@ class Program
 {
     static async Task Main(string[] args)
     {
-        Console.WriteLine("=== Skport OneBot Auto-Sign (C# Version) ===");
+        Console.WriteLine("=== Skport OneBot ===");
 
         var configManager = new ConfigManager();
         var profileManager = new ProfileManager();

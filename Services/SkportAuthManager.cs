@@ -35,8 +35,8 @@ public class SkportAuthManager
             Console.WriteLine($"[Auth] {profile.AccountName} 的 Token 已过期，正在尝试使用密码自动刷新...");
             try
             {
-                var baseToken = await _skportService.LoginByPasswordAsync(profile.Account, profile.Password);
-                var skSession = await _skportService.LoginByTokenAsync(baseToken);
+                var authResult = await _skportService.LoginByPasswordAsync(profile.Account, profile.Password);
+                var skSession = await _skportService.LoginByTokenAsync(authResult.token);
                 
                 profile.Cred = skSession.Cred;
                 profile.Token = skSession.SignToken;
