@@ -48,10 +48,10 @@ public class CronScheduler
     {
         while (!_cts.IsCancellationRequested)
         {
-            var next = expression.GetNextOccurrence(DateTimeOffset.UtcNow, TimeZoneInfo.Local);
+            var next = expression.GetNextOccurrence(DateTimeOffset.Now, TimeZoneInfo.Local);
             if (!next.HasValue) break;
 
-            var delay = next.Value - DateTimeOffset.UtcNow;
+            var delay = next.Value - DateTimeOffset.Now;
             if (delay.TotalMilliseconds > 0)
             {
                 await Task.Delay(delay, _cts.Token);
